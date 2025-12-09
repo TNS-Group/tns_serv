@@ -3,7 +3,7 @@ from hashlib import sha256
 from datetime import time
 import enum
 
-from flask import Flask, Response, jsonify, request
+from flask import Flask, Response, jsonify, request, stream_with_context
 from flask_sqlalchemy import SQLAlchemy
 from flask_admin import Admin
 from flask_admin.contrib.sqla import ModelView
@@ -17,16 +17,16 @@ app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///db.sqlite3'
 app.config['SECRET_KEY'] = sha256(b'secretKey').hexdigest()
 
-
-class Base(DeclarativeBase):
-    pass
-
-
 db = SQLAlchemy(model_class=Base)
 admin = Admin()
 
 db.init_app(app)
 admin.init_app(app)
+
+
+class Base(DeclarativeBase):
+    pass
+
 
 # Models
 class SerializableMixin:
@@ -311,9 +311,23 @@ def add_schedule():
     return {'id': new_sched.id}, 200
 
 # TODO: 
-@app.route('/notifyTeacher', methods=['POST'])
-def notify_teacher():
-    return ''
+# @app.route('/notifyTeacher', methods=['POST'])
+# def notify_teacher():
+#     return ''
+@app.route('/events')
+def eventStream():
+    def generate():
+        count = 0
+        while True:
+            yield f"data: something\n\n"
+            
+            count += 1
+            time.sleep(1) # Push a new event every second
+
+    return Response(
+        stream_with_context(generate()),
+        content_type='text/event-stream'
+    )
 
 @app.route('/profile/<int:teahcer_id>')
 def get_profile(teacher_id):

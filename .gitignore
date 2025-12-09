@@ -6,6 +6,7 @@ dist/
 wheels/
 *.egg-info
 instance/
+.firebaseServiceKey.json
 
 # Virtual environments
 .venv
