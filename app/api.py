@@ -9,6 +9,8 @@ from firebase_admin import messaging
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
+
+from app.enums import Availability
 from . import schemas, models, globals
 from .database import get_async_session
 
@@ -63,6 +65,39 @@ async def create_schedule(
     await db.refresh(schedule)
 
     return {'id': schedule.id}
+
+
+@router.post(
+    '/forceAvailability',
+    status_code=status.HTTP_200_OK,
+)
+async def force_availability(
+    availability: int,
+    token: Annotated[str, Header(alias='Authorization')],
+    db: Annotated[AsyncSession, Depends(get_async_session)],
+    until: str | None = None
+):
+    teacher = (await db.scalars(
+        select(models.Teacher).where(models.Teacher.token == token)
+    )).first()
+
+    if not teacher:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
+
+    teacher._regenerate_token = False
+    teacher.availability = Availability(availability)
+
+    await db.commit()
+    await db.refresh(teacher)
+
+    payload = {
+        "event": "reload",
+        "teacher_id": teacher.id,
+    }
+
+    for t in globals.SSE_TABLET_CONNECTIONS.values():
+        print(t)
+        await t.put(payload)
 
 
 # Tested
@@ -259,6 +294,18 @@ async def update_profile(
     await db.commit()
     await db.refresh(teacher)
 
+    payload = {
+        "event": "reload",
+        "teacher_id": teacher.id,
+    }
+
+    for t in globals.SSE_TABLET_CONNECTIONS.values():
+        print(t)
+        await t.put(payload)
+
+    # else:
+    #     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+
     return {
         'id': teacher.id, 
         'token': return_token 
@@ -400,10 +447,6 @@ async def notify_teacher(
         "tablet_session": tablet_session
     }
 
-    if teacher.id in globals.SSE_TEACHER_CONNECTIONS:
-        await globals.SSE_TEACHER_CONNECTIONS[teacher.id].put(payload)
-        return {"status": "success", "method": "SSE"}
-
     if teacher.firebase_token:
         try:
             message = messaging.Message(
@@ -416,15 +459,29 @@ async def notify_teacher(
                     "tablet_session": tablet_session,
                 },
                 token=teacher.firebase_token,
+                android=messaging.AndroidConfig(
+                    priority="high",
+                    notification=messaging.AndroidNotification(
+                        channel_id="default",
+                    ),
+                ),
+                apns=messaging.APNSConfig(
+                    headers={"apns-priority": "10"},
+                ),
             )
             response = await asyncio.to_thread(messaging.send, message)
-            return {"status": "success", "method": "FCM", "message_id": response}
+            print(response)
+            # return {"status": "success", "method": "FCM", "message_id": response}
         except Exception as e:
             print(f"FCM Error: {e}")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
                 detail="Failed to send FCM notification"
             )
+
+    if teacher.id in globals.SSE_TEACHER_CONNECTIONS:
+        await globals.SSE_TEACHER_CONNECTIONS[teacher.id].put(payload)
+        return {"status": "success"}
 
     return {"status": "failed", "reason": "No active connection or FCM token found"}
 

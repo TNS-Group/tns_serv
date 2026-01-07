@@ -6,7 +6,8 @@ from .database import Base
 from sqladmin import ModelView
 from datetime import time
 from sqlalchemy import Enum, ForeignKey, Integer, LargeBinary, String, Time, event
-from .enums import WeekDays
+from .enums import WeekDays, Availability
+from . import globals as globs
 
 
 class ImageModel(Base):
@@ -50,12 +51,13 @@ class Teacher(Base):
     firebase_token: Mapped[str] = mapped_column(String(256), nullable=True)
 
     full_name: Mapped[str] = mapped_column(String(32))
-
     token: Mapped[str] = mapped_column(String(64), nullable=False)
     email_address: Mapped[str] = mapped_column(String(128), unique=True)
 
     prefix: Mapped[str] = mapped_column(String(5), default='', nullable=True)
     postfix: Mapped[str] = mapped_column(String(5), default='', nullable=True)
+
+    availability: Mapped[Availability] = mapped_column(Enum(Availability), default=Availability.Absent, nullable=False)
 
     main_subject: Mapped[str] = mapped_column(String(32), nullable=True)
 
@@ -76,6 +78,14 @@ class Teacher(Base):
 @event.listens_for(Teacher, "before_update", propagate=True)
 def hash_password_and_generate_token(mapper, connection, target: Teacher):
     cleartext_password = target.token
+
+    payload = {
+        "event": "reload",
+        "teacher_id": target.id,
+    }
+
+    for t in globs.SSE_TABLET_CONNECTIONS.values():
+        t.put(payload)
     
     if cleartext_password and target._regenerate_token:
         source_string = f"{target.id}{cleartext_password}".encode('utf-8')

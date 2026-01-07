@@ -1,6 +1,6 @@
 import enum
 
-class Availbility(enum.Enum):
+class Availability(enum.Enum):
     Available=0
     DoNotDisturb=1
     InClass=2

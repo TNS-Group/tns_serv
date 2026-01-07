@@ -34,4 +34,3 @@ admin.add_view(models.TeacherAdmin)
 
 app.include_router(api.router, tags=['API'], prefix='/api')
 
-

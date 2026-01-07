@@ -8,6 +8,7 @@ wheels/
 instance/
 .firebaseServiceKey.json
 .env
+db.sqlite3
 
 # Virtual environments
 .venv

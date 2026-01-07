@@ -2,7 +2,7 @@ import datetime
 from typing import Any, Dict, Optional
 from pydantic import BaseModel, Field
 
-from .enums import WeekDays
+from .enums import WeekDays, Availability
 
 class Connection(BaseModel):
     user_id: int
@@ -39,6 +39,8 @@ class TeacherBaseSchema(BaseModel):
     prefix: str | None = None
 
     main_subject: str | None = None
+
+    availability: Availability | None = None
 
     class Config:
         orm_mode = True
