@@ -20,6 +20,26 @@ from sqlalchemy.ext.asyncio import AsyncSession
 router = APIRouter()
 
 
+async def verify_fcm_token(token: str):
+    message = messaging.Message(
+        token=token,
+    )
+    try:
+        # dry_run=True validates the message/token without sending
+        messaging.send(message, dry_run=True)
+        return True
+    except messaging.UnregisteredError:
+        # Token is no longer valid (app uninstalled, etc.)
+        print("Token is unregistered")
+        return False
+    except messaging.SenderIdMismatchError:
+        # Token belongs to a different Firebase project
+        print("Token project mismatch")
+        return False
+    except Exception as e:
+        print(f"Validation failed: {e}")
+        return False
+
 # Tested
 @router.get(
     '/schedule',
@@ -210,6 +230,34 @@ async def get_teacher_self(
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
 
     return teacher
+
+
+@router.post(
+    '/fcmToken',
+    status_code=status.HTTP_200_OK,
+)
+async def post_device_token(
+    fcm_token: str,
+    token: Annotated[str, Header(alias='Authorization')],
+    db: Annotated[AsyncSession, Depends(get_async_session)]
+):
+    teacher = (await db.scalars(
+        select(models.Teacher).where(models.Teacher.token == token)
+    )).first()
+
+    if not teacher:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
+
+    teacher._regenerate_token = False
+
+    if await verify_fcm_token(fcm_token):
+        teacher.firebase_token = fcm_token
+    else:
+        # TODO: Use a better status code
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN)
+
+    await db.commit()
+    await db.refresh(teacher)
 
 
 # Tested 
@@ -448,6 +496,7 @@ async def notify_teacher(
     }
 
     if teacher.firebase_token:
+        print("Firebase Token Validation: ", await verify_fcm_token(teacher.firebase_token))
         try:
             message = messaging.Message(
                 notification=messaging.Notification(
