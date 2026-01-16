@@ -40,6 +40,43 @@ async def verify_fcm_token(token: str):
         print(f"Validation failed: {e}")
         return False
 
+@router.post(
+    '/createClass',
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_class(
+    _class: schemas.SchoolClassBaseSchema,
+    db: Annotated[AsyncSession, Depends(get_async_session)],
+):
+    newclass = models.SchoolClass()
+    newclass.grade = _class.grade
+    newclass.name = _class.name
+
+    db.add(newclass)
+    await db.commit()
+    await db.refresh(newclass)
+
+@router.post(
+    '/createTeacher',
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_teacher(
+    teacher: schemas.TeacherCreate,
+    db: Annotated[AsyncSession, Depends(get_async_session)],
+):
+    newteach = models.Teacher()
+
+    newteach._regenerate_token = True
+    newteach.full_name = str(teacher.full_name)
+    newteach.token = teacher.password
+    newteach.email_address = teacher.email_address
+    newteach.prefix = teacher.prefix or ""
+    newteach.postfix = teacher.postfix or ""
+
+    db.add(newteach)
+    await db.commit()
+    await db.refresh(newteach)
+
 # Tested
 @router.get(
     '/schedule',
@@ -145,11 +182,14 @@ async def edit_schedule(
     if schedule.teacher_id != teacher.id:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
 
-    schedule.class_id = data.class_id
+    if not data.is_break: schedule.class_id = data.class_id
     schedule.subject  = data.subject 
     schedule.weekday  = data.weekday 
     schedule.time_in  = data.time_in 
     schedule.time_out = data.time_out
+    schedule.is_break = data.is_break
+    print("\t\t" + str(schedule.is_break))
+    
 
     await db.commit()
     await db.refresh(schedule)
@@ -211,6 +251,18 @@ async def get_teacher_schedules(
 
     return schedules
 
+@router.get(
+    '/allSchedules',
+    status_code=status.HTTP_200_OK,
+    response_model=List[schemas.ScheduleResponse]
+)
+async def get_all_schedules(
+    db: Annotated[AsyncSession, Depends(get_async_session)],
+):
+    result = await db.execute(select(models.Schedule))
+    schedules = result.scalars()
+
+    return schedules.all()
 
 # Tested
 @router.get(
@@ -253,8 +305,7 @@ async def post_device_token(
     if await verify_fcm_token(fcm_token):
         teacher.firebase_token = fcm_token
     else:
-        # TODO: Use a better status code
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     await db.commit()
     await db.refresh(teacher)
@@ -327,9 +378,9 @@ async def update_profile(
     teacher._regenerate_token = False
     return_token = None
 
-    old_pw_hash = sha256(f'{teacher.id}{data.old_password}'.encode('utf-8')).hexdigest()
+    old_pw_hash = sha256(f'{teacher.email_address}{data.old_password}'.encode('utf-8')).hexdigest()
     if data.new_password and data.old_password and old_pw_hash == teacher.token:
-        teacher.token = return_token = sha256(f'{teacher.id}{data.new_password}'.encode('utf-8')).hexdigest()
+        teacher.token = return_token = sha256(f'{teacher.email_address}{data.new_password}'.encode('utf-8')).hexdigest()
     elif data.new_password:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
 
@@ -369,7 +420,6 @@ async def update_profile(
 async def login(
     email: str,
     password: str,
-    firebase_token: str | None,
     db: Annotated[AsyncSession, Depends(get_async_session)],
 ):
     print(email)
@@ -381,16 +431,11 @@ async def login(
     if not teacher:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Email or password is incorrect')
 
-    testhash = sha256(f'{teacher.id}{password}'.encode('utf-8')).hexdigest()
+    testhash = sha256(f'{teacher.email_address}{password}'.encode('utf-8')).hexdigest()
     print(testhash)
 
     if teacher.token != testhash:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Email or password is incorrect')
-
-    if not teacher.firebase_token and firebase_token:
-        teacher.firebase_token = firebase_token;
-        await db.commit()
-        await db.refresh(teacher)
 
     return teacher
 
@@ -495,6 +540,15 @@ async def notify_teacher(
         "tablet_session": tablet_session
     }
 
+    success = False
+
+    print(globals.SSE_TABLET_CONNECTIONS)
+    print(globals.SSE_TEACHER_CONNECTIONS)
+
+    if teacher.id in globals.SSE_TEACHER_CONNECTIONS:
+        await globals.SSE_TEACHER_CONNECTIONS[teacher.id].put(payload)
+        success = True
+
     if teacher.firebase_token:
         print("Firebase Token Validation: ", await verify_fcm_token(teacher.firebase_token))
         try:
@@ -511,26 +565,58 @@ async def notify_teacher(
                 android=messaging.AndroidConfig(
                     priority="high",
                     notification=messaging.AndroidNotification(
-                        channel_id="default",
+                        channel_id="critical_alerts", # Must match the high-importance channel in Flutter
+                        sound="alert_sound",          # The filename in res/raw (no extension)
+                        # To add buttons on Android via FCM, you often need 'click_action'
+                        # or handle the data payload in Flutter.
                     ),
                 ),
                 apns=messaging.APNSConfig(
-                    headers={"apns-priority": "10"},
+                    payload=messaging.APNSPayload(
+                        aps=messaging.Aps(
+                            sound=messaging.CriticalSound(
+                                name="alert_sound.caf", 
+                                critical=True, 
+                                volume=1.0
+                            ),
+                            # This enables the buttons if you've defined categories in AppDelegate
+                            category="RESPOND_CATEGORY", 
+                            # interruption_level="critical",
+                        ),
+                    ),
                 ),
-            )
+            )            # message = messaging.Message(
+            #     notification=messaging.Notification(
+            #         title="Kiosk Notification",
+            #         body="Someone is looking for you",
+            #     ),
+            #     data={
+            #         "event": "notify",
+            #         "tablet_session": tablet_session,
+            #     },
+            #     token=teacher.firebase_token,
+            #     android=messaging.AndroidConfig(
+            #         priority="high",
+            #         notification=messaging.AndroidNotification(
+            #             channel_id="default",
+            #         ),
+            #     ),
+            #     apns=messaging.APNSConfig(
+            #         headers={"apns-priority": "10"},
+            #     ),
+            # )
             response = await asyncio.to_thread(messaging.send, message)
             print(response)
             # return {"status": "success", "method": "FCM", "message_id": response}
         except Exception as e:
             print(f"FCM Error: {e}")
+            print(f"Token: {teacher.firebase_token}")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
                 detail="Failed to send FCM notification"
             )
 
-    if teacher.id in globals.SSE_TEACHER_CONNECTIONS:
-        await globals.SSE_TEACHER_CONNECTIONS[teacher.id].put(payload)
-        return {"status": "success"}
+    if success: return {"status": "success"}
 
     return {"status": "failed", "reason": "No active connection or FCM token found"}
 
@@ -607,10 +693,8 @@ async def tablet_events(
         except asyncio.CancelledError:
             pass
         finally:
-            if request.client.host in globals.SSE_TABLET_CONNECTIONS:
-                del globals.SSE_TABLET_CONNECTIONS[
-                    sha256(request.client.host.encode('utf-8')).hexdigest()
-                ]
+            if tablet_session in globals.SSE_TABLET_CONNECTIONS:
+                del globals.SSE_TABLET_CONNECTIONS[tablet_session];
     return StreamingResponse(
         event_generator(),
         media_type="text/event-stream"
@@ -636,6 +720,9 @@ async def teacher_events(
     queue = asyncio.Queue()
     globals.SSE_TEACHER_CONNECTIONS[teacher.id] = queue
 
+    teacher_id = teacher.id
+    teacher_name = teacher.full_name
+
     async def event_generator():
         try:
             while True:
@@ -643,6 +730,7 @@ async def teacher_events(
                     message_data = await asyncio.wait_for(queue.get(), timeout=20)
 
                     sse_message = f"data: {json.dumps(message_data)}\n\n"
+                    print(sse_message)
                     yield sse_message
                 except asyncio.TimeoutError:
                     yield ": heartbeat\n\n"
@@ -652,9 +740,9 @@ async def teacher_events(
         except asyncio.CancelledError:
             pass
         finally:
-            if teacher.id in globals.SSE_TEACHER_CONNECTIONS:
-                del globals.SSE_TEACHER_CONNECTIONS[teacher.id]
-                print(f"User {teacher} disconnected. Active connections: {len(globals.SSE_TEACHER_CONNECTIONS)}")
+            if teacher_id in globals.SSE_TEACHER_CONNECTIONS:
+                del globals.SSE_TEACHER_CONNECTIONS[teacher_id]
+                print(f"\n\n\n\n\nUser {teacher_name} disconnected. Active connections: {len(globals.SSE_TEACHER_CONNECTIONS)}\n\n\n\n\n")
     return StreamingResponse(
         event_generator(),
         media_type="text/event-stream"

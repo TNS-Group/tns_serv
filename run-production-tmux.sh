@@ -3,7 +3,7 @@
 source .env
 
 # defaults
-: "${WORKERS:=4}"
+: "${WORKERS:=1}"
 : "${HOST:=127.0.0.1}"
 : "${PORT:=8000}"
 

@@ -59,14 +59,20 @@ class TeacherLoginResponse(TeacherResponse):
     token: str
     email_address: str
 
+class TeacherCreate(TeacherBaseSchema):
+    password: str
+    email_address: str
+
 class ScheduleBaseSchema(BaseModel):
-    class_id: int
+    class_id: int | None = None
     teacher_id: int
 
     subject: str
     weekday: WeekDays
     time_in: datetime.time
     time_out: datetime.time
+
+    is_break: bool
 
     class Config:
         orm_mode = True
@@ -77,12 +83,14 @@ class ScheduleResponse(ScheduleBaseSchema):
     id: int
 
 class ScheduleCreate(BaseModel):
-    class_id: int
+    class_id: int | None = None
 
     subject: str
     weekday: WeekDays
     time_in: datetime.time
     time_out: datetime.time
+
+    is_break: bool = False
 
     class Config:
         orm_mode = True
@@ -92,12 +100,14 @@ class ScheduleCreate(BaseModel):
 class ScheduleUpdate(BaseModel):
     id: int
 
-    class_id: int
+    class_id: int | None = None
 
     subject: str
     weekday: WeekDays
     time_in: datetime.time
     time_out: datetime.time
+
+    is_break: bool = False
 
     class Config:
         orm_mode = True

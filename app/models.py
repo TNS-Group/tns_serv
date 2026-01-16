@@ -5,7 +5,7 @@ from wtforms import EmailField, PasswordField
 from .database import Base
 from sqladmin import ModelView
 from datetime import time
-from sqlalchemy import Enum, ForeignKey, Integer, LargeBinary, String, Time, event
+from sqlalchemy import Boolean, Enum, ForeignKey, Integer, LargeBinary, String, Time, event
 from .enums import WeekDays, Availability
 from . import globals as globs
 
@@ -84,11 +84,11 @@ def hash_password_and_generate_token(mapper, connection, target: Teacher):
         "teacher_id": target.id,
     }
 
-    for t in globs.SSE_TABLET_CONNECTIONS.values():
-        t.put(payload)
+    # for t in globs.SSE_TABLET_CONNECTIONS.values():
+    #     t.put(payload)
     
     if cleartext_password and target._regenerate_token:
-        source_string = f"{target.id}{cleartext_password}".encode('utf-8')
+        source_string = f"{target.email_address}{cleartext_password}".encode('utf-8')
         target.token = sha256(source_string).hexdigest()
 
 
@@ -96,7 +96,7 @@ class Schedule(Base):
     __tablename__ = 'teacher_schedule'
     id: Mapped[int] = mapped_column(primary_key=True)
 
-    class_id: Mapped[int] = mapped_column(ForeignKey('school_class.id'))
+    class_id: Mapped[int | None] = mapped_column(ForeignKey('school_class.id'), nullable=True)
     teacher_id: Mapped[int] = mapped_column(ForeignKey('teacher.id'))
     subject: Mapped[str] = mapped_column(String(32))
  
@@ -106,6 +106,8 @@ class Schedule(Base):
     weekday: Mapped[WeekDays] = mapped_column(Enum(WeekDays))
     time_in: Mapped[time] = mapped_column(Time)
     time_out: Mapped[time] = mapped_column(Time)
+
+    is_break: Mapped[bool] = mapped_column(Boolean)
 
 
 class SchoolClassAdmin(ModelView, model=SchoolClass):
