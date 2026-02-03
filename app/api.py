@@ -11,34 +11,16 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from app.enums import Availability
+from app.utils import verify_fcm_token
 from . import schemas, models, globals
 from .database import get_async_session
 
 from fastapi import APIRouter, Depends, File, HTTPException, Header, Request, Response, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+
 router = APIRouter()
 
-
-async def verify_fcm_token(token: str):
-    message = messaging.Message(
-        token=token,
-    )
-    try:
-        # dry_run=True validates the message/token without sending
-        messaging.send(message, dry_run=True)
-        return True
-    except messaging.UnregisteredError:
-        # Token is no longer valid (app uninstalled, etc.)
-        print("Token is unregistered")
-        return False
-    except messaging.SenderIdMismatchError:
-        # Token belongs to a different Firebase project
-        print("Token project mismatch")
-        return False
-    except Exception as e:
-        print(f"Validation failed: {e}")
-        return False
 
 @router.post(
     '/createClass',
@@ -565,11 +547,11 @@ async def notify_teacher(
                 android=messaging.AndroidConfig(
                     priority="high",
                     notification=messaging.AndroidNotification(
-                        channel_id="critical_alerts", # Must match the high-importance channel in Flutter
-                        sound="alert_sound",          # The filename in res/raw (no extension)
-                        # To add buttons on Android via FCM, you often need 'click_action'
-                        # or handle the data payload in Flutter.
-                    ),
+                        title="Kiosk Notification",
+                        body="Someone is looking for you",
+                        channel_id="critical_alerts",
+                            sound="alert_sound",
+                        ),
                 ),
                 apns=messaging.APNSConfig(
                     payload=messaging.APNSPayload(
@@ -579,35 +561,13 @@ async def notify_teacher(
                                 critical=True, 
                                 volume=1.0
                             ),
-                            # This enables the buttons if you've defined categories in AppDelegate
                             category="RESPOND_CATEGORY", 
-                            # interruption_level="critical",
                         ),
                     ),
                 ),
-            )            # message = messaging.Message(
-            #     notification=messaging.Notification(
-            #         title="Kiosk Notification",
-            #         body="Someone is looking for you",
-            #     ),
-            #     data={
-            #         "event": "notify",
-            #         "tablet_session": tablet_session,
-            #     },
-            #     token=teacher.firebase_token,
-            #     android=messaging.AndroidConfig(
-            #         priority="high",
-            #         notification=messaging.AndroidNotification(
-            #             channel_id="default",
-            #         ),
-            #     ),
-            #     apns=messaging.APNSConfig(
-            #         headers={"apns-priority": "10"},
-            #     ),
-            # )
+            )
             response = await asyncio.to_thread(messaging.send, message)
             print(response)
-            # return {"status": "success", "method": "FCM", "message_id": response}
         except Exception as e:
             print(f"FCM Error: {e}")
             print(f"Token: {teacher.firebase_token}")

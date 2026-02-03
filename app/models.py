@@ -1,11 +1,11 @@
 from hashlib import sha256
 from typing import List
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column, object_session, relationship
 from wtforms import EmailField, PasswordField
 from .database import Base
 from sqladmin import ModelView
 from datetime import time
-from sqlalchemy import Boolean, Enum, ForeignKey, Integer, LargeBinary, String, Time, event
+from sqlalchemy import Boolean, Enum, ForeignKey, Integer, LargeBinary, String, Time, event, select
 from .enums import WeekDays, Availability
 from . import globals as globs
 
@@ -59,20 +59,23 @@ class Teacher(Base):
 
     availability: Mapped[Availability] = mapped_column(Enum(Availability), default=Availability.Absent, nullable=False)
 
-    main_subject: Mapped[str] = mapped_column(String(32), nullable=True)
+    main_subject: Mapped[str] = mapped_column(String(128), nullable=True)
 
     profile_picture_image: Mapped["ImageModel | None"] = relationship(
         "ImageModel",
         back_populates="teacher",
         uselist=False,
-        lazy="select"
+        lazy="select",
+        cascade="all, delete-orphan"
     )
 
-    schedules: Mapped[List["Schedule"]] = relationship(back_populates='teacher')
+    schedules: Mapped[List["Schedule"]] = relationship(
+        back_populates='teacher',
+        cascade="all, delete-orphan"
+    )
 
     def __str__(self):
         return f'{self.prefix} {self.full_name} {self.postfix}'
-
 
 @event.listens_for(Teacher, "before_insert", propagate=True)
 @event.listens_for(Teacher, "before_update", propagate=True)

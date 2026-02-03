@@ -8,7 +8,7 @@ DATABASE_URL = "sqlite+aiosqlite:///./db.sqlite3"
 
 engine = create_async_engine(
     DATABASE_URL,
-    echo=True,
+    echo=False,
     # connect_args={"check_same_thread": False} # Not needed for async aiosqlite
 )
 
